@@ -1,0 +1,49 @@
+<html>
+<body>
+<pre>
+<h1>µVision Build Log</h1>
+<h2>Project:</h2>
+C:\Keil\Labware\Lab15_SpaceInvaders_ST7735\SpaceInvaders.uvproj
+Project File Date:  11/28/2020
+
+<h2>Output:</h2>
+Build target 'SpaceInvaders'
+compiling ADC.c...
+ADC.c(35): error:  #20: identifier "uint32_t" is undefined
+  unsigned long Convert(uint32_t input){
+ADC.c(36): error:  #20: identifier "uint32_t" is undefined
+        uint32_t result = 0;                                                            // min value is 0, max value is 2000
+ADC.c: 0 warnings, 2 errors
+compiling Sound.c...
+Sound.c(1147): warning:  #223-D: function "DAC_Init" declared implicitly
+        DAC_Init();
+Sound.c(1149): error:  #20: identifier "TIMER0_CTL_R" is undefined
+        TIMER0_CTL_R = 0x00000000;    // 1) disable TIMER1A during setup
+Sound.c(1150): error:  #20: identifier "TIMER0_TAILR_R" is undefined
+        TIMER0_TAILR_R = period-1;    // 4) reload value
+Sound.c(1150): error:  #20: identifier "period" is undefined
+        TIMER0_TAILR_R = period-1;    // 4) reload value
+Sound.c(1151): error:  #20: identifier "NVIC_PRI4_R" is undefined
+        NVIC_PRI4_R = (NVIC_PRI4_R&0x00FFFFFF)|0x00000000; // 8) priority 4
+Sound.c: 1 warning, 4 errors
+compiling SpaceInvaders.c...
+SpaceInvaders.c(88): warning:  #550-D: variable "delay" was set but never used
+        unsigned long delay;
+SpaceInvaders.c(99): warning:  #550-D: variable "delay" was set but never used
+        unsigned long delay;
+SpaceInvaders.c(119): error:  #20: identifier "PF2" is undefined
+        PF2 ^= 0xFF;          
+SpaceInvaders.c(123): warning:  #223-D: function "ADC_In" declared implicitly
+                ADCMail += ADC_In();
+SpaceInvaders.c(139): warning:  #167-D: argument of type "void (*)(const uint8_t *, uint32_t)" is incompatible with parameter of type "void (*)(void)"
+        Timer0_Init(*Sound_Play, 7256);
+SpaceInvaders.c(142): warning:  #177-D: variable "myLanguage" was declared but never referenced
+        Language_t myLanguage=English;
+SpaceInvaders.c(154): warning:  #177-D: variable "Phrases" was declared but never referenced
+        const char *Phrases[5][2]={
+SpaceInvaders.c: 6 warnings, 1 error
+".\SpaceInvaders.axf" - 7 Error(s), 7 Warning(s).
+Target not created
+</pre>
+</body>
+</html>
