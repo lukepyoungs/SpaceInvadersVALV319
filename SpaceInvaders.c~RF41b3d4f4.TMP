@@ -1,0 +1,358 @@
+// SpaceInvaders.c
+// Runs on LM4F120/TM4C123
+// Jonathan Valvano and Daniel Valvano
+// This is a starter project for the EdX Lab 15
+
+// Last Modified: 8/11/2020
+// for images and sounds, see http://users.ece.utexas.edu/~valvano/Volume1/Lab10Files
+// http://www.spaceinvaders.de/
+// sounds at http://www.classicgaming.cc/classics/spaceinvaders/sounds.php
+// http://www.classicgaming.cc/classics/spaceinvaders/playguide.php
+/* This example accompanies the books
+   "Embedded Systems: Real Time Interfacing to Arm Cortex M Microcontrollers",
+   ISBN: 978-1463590154, Jonathan Valvano, copyright (c) 2020
+
+   "Embedded Systems: Introduction to Arm Cortex M Microcontrollers",
+   ISBN: 978-1469998749, Jonathan Valvano, copyright (c) 2020
+
+ Copyright 2020 by Jonathan W. Valvano, valvano@mail.utexas.edu
+    You may use, edit, run or distribute this file
+    as long as the above copyright notice remains
+ THIS SOFTWARE IS PROVIDED "AS IS".  NO WARRANTIES, WHETHER EXPRESS, IMPLIED
+ OR STATUTORY, INCLUDING, BUT NOT LIMITED TO, IMPLIED WARRANTIES OF
+ MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE APPLY TO THIS SOFTWARE.
+ VALVANO SHALL NOT, IN ANY CIRCUMSTANCES, BE LIABLE FOR SPECIAL, INCIDENTAL,
+ OR CONSEQUENTIAL DAMAGES, FOR ANY REASON WHATSOEVER.
+ For more information about my classes, my research, and my books, see
+ http://users.ece.utexas.edu/~valvano/
+ */
+// ******* Possible Hardware I/O connections*******************
+// Slide pot pin 1 connected to ground
+// Slide pot pin 2 connected to PE2/AIN1
+// Slide pot pin 3 connected to +3.3V
+// fire button connected to PE0
+// special weapon fire button connected to PE1
+// 8*R resistor DAC bit 0 on PB0 (least significant bit)
+// 4*R resistor DAC bit 1 on PB1
+// 2*R resistor DAC bit 2 on PB2
+// 1*R resistor DAC bit 3 on PB3 (most significant bit)
+// LED on PB4
+// LED on PB5
+
+// Backlight (pin 10) connected to +3.3 V
+// MISO (pin 9) unconnected
+// SCK (pin 8) connected to PA2 (SSI0Clk)
+// MOSI (pin 7) connected to PA5 (SSI0Tx)
+// TFT_CS (pin 6) connected to PA3 (SSI0Fss)
+// CARD_CS (pin 5) unconnected
+// Data/Command (pin 4) connected to PA6 (GPIO), high for data, low for command
+// RESET (pin 3) connected to PA7 (GPIO)
+// VCC (pin 2) connected to +3.3 V
+// Gnd (pin 1) connected to ground
+
+#include <stdint.h>
+#include "tm4c123gh6pm.h"
+#include "ST7735.h"
+#include "Sound.h"
+#include "Random.h"
+#include "PLL.h"
+#include "ADC.h"
+#include "DAC.h"
+#include "Images.h"
+#include "Timer0.h"
+#include "Timer1.h"
+#define PF1       (*((volatile uint32_t *)0x40025008))
+#define PF2       (*((volatile uint32_t *)0x40025010))
+#define PF3       (*((volatile uint32_t *)0x40025020))
+
+void DisableInterrupts(void); // Disable interrupts
+void EnableInterrupts(void);  // Enable interrupts
+void Delay100ms(uint32_t count); // time delay in 0.1 seconds
+void GameOver(void);	// function prototype for GameOver
+void Victory(void);
+void DAC_Init(void);
+void HardInit(void);
+void Timer2_Init(void(*task)(void), unsigned long period);
+unsigned long ADCMail;
+unsigned long ADCStatus;
+signed long ADCData, Pos, Buf;
+
+extern unsigned char String[12];
+void ConvertUDec(unsigned long n);
+void ConvertDistance(unsigned long n);
+void LCD_OutUDec(unsigned long n){
+  ConvertUDec(n);     // convert using your function
+  ST7735_OutString((char *)String);  // output using your function
+}
+void LCD_OutDistance(unsigned long n){
+  ConvertDistance(n);      // convert using your function
+  ST7735_OutString((char *)String);  // output using your function
+}
+void PortF_Init(void){
+	unsigned long delay;
+	SYSCTL_RCGCGPIO_R |= 0x20;
+	delay=0;
+	SYSCTL_RCGCGPIO_R |= 0x20;
+	while((SYSCTL_PRGPIO_R&0x20) == 0){};
+	GPIO_PORTE_DIR_R &= ~0x07;
+	GPIO_PORTE_AFSEL_R &= ~0x07;
+	GPIO_PORTE_AMSEL_R &= ~0x07;
+	GPIO_PORTE_DEN_R |= 0x07;
+}
+void PortE_Init(void){
+	unsigned long delay;
+	SYSCTL_RCGCGPIO_R |= 0x10;
+	delay=0;
+	SYSCTL_RCGCGPIO_R |= 0x10;
+	while((SYSCTL_PRGPIO_R&0x10) == 0){};
+	GPIO_PORTE_DIR_R &= ~0x03; // PE0 PE1 input
+	GPIO_PORTE_AFSEL_R &= ~0x03;
+	GPIO_PORTE_AMSEL_R &= ~0x03;
+	GPIO_PORTE_DEN_R |= 0x03;
+}
+void SysTick_Init(void){
+	NVIC_ST_CTRL_R = 0;    					// disable SysTick during setup
+  NVIC_ST_CTRL_R = 0x07;
+  NVIC_ST_RELOAD_R = 2000000;			// reload value --> 40 Hz
+  NVIC_ST_CURRENT_R = 0;      		// any write to current clears it
+}
+int IntCounter;
+
+void SysTick_Handler(void){
+//Toggle Heartbeat Twice
+	PF2 ^= 0xFF;
+  PF2 ^= 0xFF;
+//Sample ADC
+	for(int i = 0; i < 20; i++){
+		ADCMail += ADC_In();
+	}
+	ADCMail = (ADCMail/20);
+//Set Flag
+	ADCStatus = 1;
+	PF2 ^= 0xFF;
+	IntCounter = IntCounter + 1;
+}
+int OnePressed=0;
+int Button1Press (void){
+	OnePressed=(GPIO_PORTE_DATA_R&0x01);
+	return OnePressed;
+}
+int TwoPressed=0;
+int Button2Press (void){
+	TwoPressed=(GPIO_PORTE_DATA_R&0x01);
+	return TwoPressed;
+}
+void SetButton1 (unsigned long state){
+	OnePressed=state;
+}
+void SetButton2 (unsigned long state){
+	TwoPressed=state;
+}
+
+void CreateStartScn(void){
+	ST7735_FillScreen(0x0000);            // set screen to black
+  ST7735_SetCursor(1, 2);
+  ST7735_OutString("Welcome to Space Invaders");
+  ST7735_SetCursor(1, 4);
+  ST7735_OutString("Your help is needed to");
+  ST7735_SetCursor(1, 6);
+  ST7735_OutString("destroy the dreaded alien");
+	ST7735_SetCursor(1, 8);
+	ST7735_OutString("fleet. Fail and humanity");
+	ST7735_SetCursor(1, 10);
+	ST7735_OutString("will face dire consequences!");
+	ST7735_SetCursor(1, 12);
+	ST7735_OutString("Press B1 to continue");
+	ST7735_SetCursor(1, 14);
+	ST7735_OutString("Press B2 for Language");
+}
+void CreateLangScn(void){
+	ST7735_FillScreen(0x0000);            // set screen to black
+  ST7735_SetCursor(1, 2);
+  ST7735_OutString("Choose your language:");
+  ST7735_SetCursor(1, 4);
+  ST7735_OutString("Press B1 for English");
+  ST7735_SetCursor(1, 6);
+  ST7735_OutString("Press B2 for Espa\xA4ol");
+}
+int GoFlag=0;
+int LangHold;
+uint32_t score = 0;								// player score
+uint32_t LaserNumP = 0;		// number of player lasers on screen
+uint32_t enemyLaserCount = 0;			// number of enemy lasers on screen
+uint32_t enemiesAlive = 0;				// number of alive enemies
+uint32_t enemiesKilled = 0;				// number of dead enemies
+uint32_t enemyDelay = 0;					// enemy fire delay
+uint32_t frame = 0;								// current frame
+uint32_t enemyFireDelay = 0;			// delay that the enemy fires at
+uint32_t horizontalCounter = 0;		// enemy horizontal movement counter
+uint32_t verticalCounter = 0;			// enemy vertical movement counter
+uint32_t gameRunning = 0;					// check if game is running
+uint32_t stage = 0;								// current stage of game
+
+int StartCheck(void){
+	return GoFlag;
+}
+void StartScn(void){
+	int LangCheck;									// lang falg
+	LangCheck = Button2Press();		// check  lang butt
+	if(LangCheck){
+		CreateLangScn();
+		SetButton2(0);
+	}
+
+	while(LangCheck){
+			if(Button1Press()){
+		LangHold=1;
+}
+	if(Button2Press()){
+		LangHold=2;
+	}
+		LangCheck = Button2Press(); 	// polls controls button state while in controls
+		SetButton1(0);
+		if(!LangCheck){
+			CreateStartScn();
+			SetButton2(0);
+		}
+	}
+
+	if(Button1Press()){
+		GoFlag = 1;
+	}
+}
+struct PlayerShip{
+	uint32_t xP;									// x-axis position
+	uint32_t yP;									// y-axis position
+	uint32_t HP;										// health of player
+	int deathstate;												// status of recent death
+	const unsigned short *image; 		// pointer to bitmaps
+};
+typedef struct PlayerShip PlayerShip_t;	// player sprite datatype
+
+// Sprites used for enemies
+struct EnemyShip{
+	uint32_t xP;									// x-axis position
+	uint32_t yP;									// y-axis position
+	uint32_t HP;										// health of enemy
+	uint32_t pointval;								// point value of enemy
+	int deathstate;												// status of recent death
+	const unsigned short *image[2]; // pointer to bitmaps
+	/* 2 images emulate animation */
+};
+typedef struct EnemyShip EnemyShip_t;		// enemy sprite datatype
+
+struct LaserSprite{
+	int xP;											// x-axis position
+	int yP;											// y-axis position
+	int deathstate;											// status of laser (alive/dead)
+	const unsigned short *image; 	// pointer to bitmaps
+	unsigned short velocity;								// vertical speed of laser
+};
+typedef struct LaserSprite PlayerLaser_t;		// player laser sprite datatype
+typedef struct LaserSprite EnemyLaser_t;		// enemy laser sprite datatype
+
+PlayerShip_t Player;
+EnemyShip_t Enemies[18];
+PlayerLaser_t PlayerLasers[4];	// maximum # of player lasers on screen is 4
+EnemyLaser_t EnemyLasers[4];		// maximum # of enemy lasers on screen is 4
+
+void UpdateScore(int currentScore){
+	ST7735_SetCursor(7, 1);
+	ST7735_OutString("Score:");
+	LCD_OutUDec(currentScore);
+}
+
+int main(void){
+  DAC_Init();
+	PLL_Init(Bus80MHz);       // Bus clock is 80 MHz
+  Random_Init(NVIC_ST_CURRENT_R);
+	PortF_Init();
+	PortE_Init();
+	SysTick_Init();
+  Output_Init();
+
+	unsigned long state=0; //state holder
+	CreateStartScn();
+	while(state==0){
+		StartScn();
+		state=StartCheck();
+	}
+	while(1){
+		if(state==1){
+			if(LangHold==1){
+				ST7735_FillScreen(0x0000);
+			}
+			if(LangHold==2){
+
+			}
+		}
+	}
+	typedef enum {English, Spanish} Language_t;
+	Language_t myLanguage=English;
+	typedef enum {HELLO,SELECT,LANGUAGE,GAME,OVER} phrase_t;
+	const char Hello_English[]="HELLO";
+	const char Hello_Spanish[]="\xADHola!";
+	const char Select_English[]="SELECT";
+	const char Select_Spanish[]="ESCOGER";
+	const char Game_English[]="GAME";
+	const char Game_Spanish[]="JUEGO";
+	const char Over_Spanish[]="TERMINADO";
+	const char Over_English[]="OVER";
+	const char Language_Spanish[]="Espa\xA4ol";
+	const char Language_English[]="English";
+	const char *Phrases[5][2]={
+		{Hello_English,Hello_Spanish},
+		{Select_English,Select_Spanish},
+		{Language_English, Language_Spanish},
+		{Game_English, Game_Spanish},
+		{Over_English, Over_Spanish}
+	};
+
+
+
+
+
+
+
+
+
+  ST7735_FillScreen(0x0000);            // set screen to black
+
+  ST7735_DrawBitmap(52, 159, PlayerShip0, 18,8); // player ship middle bottom
+  ST7735_DrawBitmap(53, 151, Bunker0, 18,5);
+
+  ST7735_DrawBitmap(0, 9, SmallEnemy10pointA, 16,10);
+  ST7735_DrawBitmap(20,9, SmallEnemy10pointB, 16,10);
+  ST7735_DrawBitmap(40, 9, SmallEnemy20pointA, 16,10);
+  ST7735_DrawBitmap(60, 9, SmallEnemy20pointB, 16,10);
+  ST7735_DrawBitmap(80, 9, SmallEnemy30pointA, 16,10);
+  ST7735_DrawBitmap(100, 9, SmallEnemy30pointB, 16,10);
+
+  Delay100ms(50);              // delay 5 sec at 80 MHz
+
+  ST7735_FillScreen(0x0000);            // set screen to black
+  ST7735_SetCursor(1, 1);
+  ST7735_OutString("GAME OVER");
+  ST7735_SetCursor(1, 2);
+  ST7735_OutString("Nice try,");
+  ST7735_SetCursor(1, 3);
+  ST7735_OutString("Earthling!");
+  ST7735_SetCursor(2, 4);
+  LCD_OutUDec(1234);
+  while(1){
+  }
+}
+
+
+// You can't use this timer, it is here for starter code only
+// you must use interrupts to perform delays
+
+void Delay100ms(uint32_t count){uint32_t volatile time;
+  while(count>0){
+    time = 727240;  // 0.1sec at 80 MHz
+    while(time){
+	  	time--;
+    }
+    count--;
+  }
+}

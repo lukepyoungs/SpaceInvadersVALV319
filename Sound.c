@@ -7,11 +7,17 @@
 #include <stdint.h>
 #include "Sound.h"
 #include "DAC.h"
+#include "Timer0.h"
 
-unsigned char Index=0;
-unsigned char *songPt;
-unsigned long songLength;
-unsigned long songIndex=0;
+#define PF1       (*((volatile uint32_t *)0x40025008))	
+#define PF2       (*((volatile uint32_t *)0x40025010))	
+#define PF3       (*((volatile uint32_t *)0x40025020))	
+
+const unsigned char *curr;			// pointer to array that nees to be played
+unsigned long Z;							// gives the current index in the array that needs to be output
+unsigned long Len;				// gives the length of a sound
+int SemaSound = 0;								// flag used to determine if a sound needs to be played
+int FlagDebug;
 
 const uint8_t shoot[4080] = {
   129, 99, 103, 164, 214, 129, 31, 105, 204, 118, 55, 92, 140, 225, 152, 61, 84, 154, 184, 101, 
@@ -1141,21 +1147,48 @@ const uint8_t highpitch[1802] = {
   147, 103, 91, 10, 13, 45, 68, 127, 158, 163, 174, 254, 212, 200, 154, 101, 90, 42, 5, 42, 
   67, 119, 148, 166, 164, 238, 223, 202, 174, 112, 96, 78, 0, 34, 54, 99, 143, 160, 166, 183, 
   250, 207};
+void Sound_Master(void){
+	if((Len<Z) && SemaSound){
+		DAC_Out(curr[Z]);
+		Z++;
+		if(FlagDebug == 1){
+			PF1 = 0xFF;														// debugging heartbeat LED turned on
+		}
+		else if(FlagDebug == 2){
+			PF2 = 0xFF;
+		}
+  }
+	else{
+		DAC_Out(0);															// nullify DAC output
+		FlagDebug = 0;													// set soundFlag to false
+		Len = 0;												// soundLength reset
+		Z = 0;															// Index is reset
+		PF2 = 0x00;															// debugging heartbeat LED turned off
+		PF1 = 0x00;
+		PF3 = 0x00;
+		SemaSound = 0;
+  }
+}
 
 void Sound_Init(void){
 // write this
 	DAC_Init();
-	Index=0;
-	TIMER0_CTL_R = 0x00000000;    // 1) disable TIMER1A during setup
-	TIMER0_TAILR_R = period-1;    // 4) reload value
-	NVIC_PRI4_R = (NVIC_PRI4_R&0x00FFFFFF)|0x00000000; // 8) priority 4
+	Z=0;
+	SemaSound=0;
+	Len=0;
+	Timer0_Init(Sound_Master, 80000000/11025);	// initialize Timer0 at 11.025 kHz
 };
 void Sound_Play(const uint8_t *pt, uint32_t count){
 // write this
+	curr=pt;
+	Len=count;
+	SemaSound=1;
+	Z=0;
 };
+
 void Sound_Shoot(void){
 // write this
-	Sound_Play(shoot,3377);
+	Sound_Play(shoot,4080);
 };
 void Sound_Killed(void){
 // write this
@@ -1163,6 +1196,7 @@ void Sound_Killed(void){
 };
 void Sound_Explosion(void){
 // write this
+	Sound_Play(explosion,2000);
 };
 
 void Sound_Fastinvader1(void){
@@ -1179,4 +1213,5 @@ void Sound_Fastinvader4(void){
 };
 void Sound_Highpitch(void){
 // write this
+	Sound_Play(highpitch,1802);
 };

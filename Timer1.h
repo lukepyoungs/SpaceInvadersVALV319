@@ -20,7 +20,7 @@
  For more information about my classes, my research, and my books, see
  http://users.ece.utexas.edu/~valvano/
  */
-
+#include <stdint.h>
 #ifndef __TIMER1INTS_H__ // do not include more than once
 #define __TIMER1INTS_H__
 
@@ -31,4 +31,5 @@
 // Outputs: none
 void Timer1_Init(void(*task)(void), uint32_t period);
 
+void Timer1A_Handler(void);
 #endif // __TIMER2INTS_H__
